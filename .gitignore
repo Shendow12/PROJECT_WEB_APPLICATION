@@ -1,0 +1,36 @@
+# ------------------------------------------------
+# 1. SECURITATE (Cel mai important)
+# ------------------------------------------------
+# Ignoră fișierul cu parolele și cheile API. 
+# Dacă urci asta pe GitHub, oricine îți poate fura baza de date!
+.env
+
+# ------------------------------------------------
+# 2. MEDIUL VIRTUAL (Python)
+# ------------------------------------------------
+# Ignoră folderul cu bibliotecile instalate (este uriaș și inutil pe Git)
+venv/
+env/
+.venv/
+
+# ------------------------------------------------
+# 3. FIȘIERE TEMPORARE PYTHON
+# ------------------------------------------------
+# Fișiere compilate automat de Python (nu avem nevoie de ele)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ------------------------------------------------
+# 4. SETĂRI IDE (Opțional, dar recomandat)
+# ------------------------------------------------
+# Setările locale din VS Code sau PyCharm
+.vscode/
+.idea/
+
+# ------------------------------------------------
+# 5. FIȘIERE DE SISTEM
+# ------------------------------------------------
+.DS_Store
+Thumbs.db
