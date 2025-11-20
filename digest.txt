@@ -1,24 +1,30 @@
+Directory structure:
+└── Application1/
+    └── main.py
+
+================================================
+FILE: main.py
+================================================
 import os
 from fastapi import FastAPI, HTTPException, Query, Body, status, Path
 from pydantic import BaseModel
 from typing import List, Optional
 from dotenv import load_dotenv
 from supabase import create_client, Client
-from datetime import datetime, timedelta, timezone
 
 # --- 1. Configurare & Conexiune ---
 load_dotenv()
 
 app = FastAPI(
     title="QuickWash API",
-    description="Backend V3: Arhitectură ierarhică (Nested Routes) pentru Spălătorii și Boxe."
+    description="Backend V3: ArhitecturÄƒ ierarhicÄƒ (Nested Routes) pentru SpÄƒlÄƒtorii È™i Boxe."
 )
 
 SUPABASE_URL: str = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY: str = os.environ.get("SUPABASE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-    raise RuntimeError("SUPABASE_URL sau SUPABASE_KEY lipsesc din fișierul .env")
+    raise RuntimeError("SUPABASE_URL sau SUPABASE_KEY lipsesc din fiÈ™ierul .env")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -27,7 +33,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # 2. MODELE DE DATE (Pydantic Schemas)
 # ==========================================
 
-# --- Spălătorii ---
+# --- SpÄƒlÄƒtorii ---
 class SpalatorieCreate(BaseModel):
     nume: str
     adresa: Optional[str] = None
@@ -41,7 +47,7 @@ class SpalatorieResponse(BaseModel):
     adresa: Optional[str]
     latitudine: float
     longitudine: float
-    distanta_km: Optional[float] = None # Opțional, apare doar la căutare
+    distanta_km: Optional[float] = None # OpÈ›ional, apare doar la cÄƒutare
 
 # --- Boxe ---
 class BoxaBase(BaseModel):
@@ -51,7 +57,7 @@ class BoxaBase(BaseModel):
     is_available: bool = True
 
 class BoxaCreate(BoxaBase):
-    # NOTĂ: Am scos 'spalatorie_id' de aici. Îl luăm din URL!
+    # NOTÄ‚: Am scos 'spalatorie_id' de aici. ÃŽl luÄƒm din URL!
     pass
 
 class BoxaUpdate(BaseModel):
@@ -64,20 +70,6 @@ class BoxaResponse(BoxaBase):
     boxa_id: str
     spalatorie_id: str
 
-# --- Rezervări ---
-class RezervareCreate(BaseModel):
-    boxa_id: str
-    # Clientul trimite doar cât vrea să stea, nu ora de sfârșit
-    durata_minute: int 
-    client_ref: Optional[str] = None # Nr. înmatriculare
-
-class RezervareResponse(BaseModel):
-    rezervare_id: str
-    boxa_id: str
-    ora_start: datetime
-    ora_sfarsit: datetime
-    status: str
-
 
 # ==========================================
 # 3. RUTE API (Endpoints)
@@ -88,10 +80,10 @@ def read_root():
     return {"status": "QuickWash API V3 este live!"}
 
 # ---------------------------
-# A. SPĂLĂTORII (Rute Principale)
+# A. SPÄ‚LÄ‚TORII (Rute Principale)
 # ---------------------------
 
-@app.post("/spalatorii", status_code=status.HTTP_201_CREATED, summary="Adaugă Spălătorie")
+@app.post("/spalatorii", status_code=status.HTTP_201_CREATED, summary="AdaugÄƒ SpÄƒlÄƒtorie")
 def add_spalatorie(spalatorie: SpalatorieCreate = Body(...)):
     try:
         data_to_insert = spalatorie.model_dump()
@@ -108,14 +100,14 @@ def add_spalatorie(spalatorie: SpalatorieCreate = Body(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/spalatorii-apropiate", response_model=List[SpalatorieResponse], summary="Căutare Geo")
+@app.get("/spalatorii-apropiate", response_model=List[SpalatorieResponse], summary="CÄƒutare Geo")
 def get_spalatorii_apropiate(
     lat: float = Query(..., description="Lat user"),
     lon: float = Query(..., description="Lon user"),
-    raza_km: float = Query(5.0, description="Raza în km")
+    raza_km: float = Query(5.0, description="Raza Ã®n km")
 ):
     """
-    Returnează spălătoriile cu cel puțin o boxă liberă.
+    ReturneazÄƒ spÄƒlÄƒtoriile cu cel puÈ›in o boxÄƒ liberÄƒ.
     """
     try:
         response = supabase.rpc(
@@ -136,7 +128,7 @@ def get_spalatorii_apropiate(
 # ---------------------------
 
 # 1. LISTARE: GET /spalatorii/{id}/boxe
-@app.get("/spalatorii/{spalatorie_id}/boxe", response_model=List[BoxaResponse], summary="Vezi toate boxele unei locații")
+@app.get("/spalatorii/{spalatorie_id}/boxe", response_model=List[BoxaResponse], summary="Vezi toate boxele unei locaÈ›ii")
 def get_boxe_spalatorie(spalatorie_id: str):
     try:
         response = supabase.table('boxe').select('*').eq('spalatorie_id', spalatorie_id).execute()
@@ -145,13 +137,13 @@ def get_boxe_spalatorie(spalatorie_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 # 2. DETALII: GET /spalatorii/{id}/boxe/{boxa_id} (NOU)
-@app.get("/spalatorii/{spalatorie_id}/boxe/{boxa_id}", response_model=BoxaResponse, summary="Vezi o boxă specifică")
+@app.get("/spalatorii/{spalatorie_id}/boxe/{boxa_id}", response_model=BoxaResponse, summary="Vezi o boxÄƒ specificÄƒ")
 def get_single_boxa(
     spalatorie_id: str, 
     boxa_id: str
 ):
     try:
-        # Căutăm boxa care are SI id-ul corect SI aparține spălătoriei corecte (siguranță dublă)
+        # CÄƒutÄƒm boxa care are SI id-ul corect SI aparÈ›ine spÄƒlÄƒtoriei corecte (siguranÈ›Äƒ dublÄƒ)
         response = supabase.table('boxe').select('*')\
             .eq('boxa_id', boxa_id)\
             .eq('spalatorie_id', spalatorie_id)\
@@ -159,21 +151,21 @@ def get_single_boxa(
         
         if response.data:
             return response.data[0]
-        raise HTTPException(status_code=404, detail="Boxa nu a fost găsită în această spălătorie.")
+        raise HTTPException(status_code=404, detail="Boxa nu a fost gÄƒsitÄƒ Ã®n aceastÄƒ spÄƒlÄƒtorie.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 # 3. CREARE: POST /spalatorii/{id}/boxe
-@app.post("/spalatorii/{spalatorie_id}/boxe", status_code=status.HTTP_201_CREATED, response_model=BoxaResponse, summary="Adaugă Boxă")
+@app.post("/spalatorii/{spalatorie_id}/boxe", status_code=status.HTTP_201_CREATED, response_model=BoxaResponse, summary="AdaugÄƒ BoxÄƒ")
 def adauga_boxa(
     spalatorie_id: str,
     boxa: BoxaCreate = Body(...)
 ):
     """
-    Adaugă o boxă. ID-ul spălătoriei este luat automat din URL.
+    AdaugÄƒ o boxÄƒ. ID-ul spÄƒlÄƒtoriei este luat automat din URL.
     """
     try:
-        # Pregătim datele: luăm ce e în body și adăugăm ID-ul din URL
+        # PregÄƒtim datele: luÄƒm ce e Ã®n body È™i adÄƒugÄƒm ID-ul din URL
         insert_data = boxa.model_dump()
         insert_data['spalatorie_id'] = spalatorie_id
         
@@ -184,11 +176,11 @@ def adauga_boxa(
         raise HTTPException(status_code=500, detail="Eroare la creare.")
     except Exception as e:
         if "foreign key" in str(e):
-            raise HTTPException(status_code=404, detail="Spălătoria (ID URL) nu există.")
+            raise HTTPException(status_code=404, detail="SpÄƒlÄƒtoria (ID URL) nu existÄƒ.")
         raise HTTPException(status_code=500, detail=str(e))
 
 # 4. UPDATE: PATCH /spalatorii/{id}/boxe/{boxa_id}
-@app.patch("/spalatorii/{spalatorie_id}/boxe/{boxa_id}", response_model=BoxaResponse, summary="Update Boxă")
+@app.patch("/spalatorii/{spalatorie_id}/boxe/{boxa_id}", response_model=BoxaResponse, summary="Update BoxÄƒ")
 def update_boxa(
     spalatorie_id: str,
     boxa_id: str,
@@ -197,9 +189,9 @@ def update_boxa(
     try:
         update_data = boxa_update.model_dump(exclude_unset=True)
         if not update_data:
-            raise HTTPException(status_code=400, detail="Fără date de update.")
+            raise HTTPException(status_code=400, detail="FÄƒrÄƒ date de update.")
 
-        # Facem update doar dacă boxa corespunde și cu ID-ul și cu Spălătoria
+        # Facem update doar dacÄƒ boxa corespunde È™i cu ID-ul È™i cu SpÄƒlÄƒtoria
         response = supabase.table('boxe').update(update_data)\
             .eq('boxa_id', boxa_id)\
             .eq('spalatorie_id', spalatorie_id)\
@@ -207,12 +199,12 @@ def update_boxa(
         
         if response.data:
             return response.data[0]
-        raise HTTPException(status_code=404, detail="Boxa nu există sau nu aparține acestei spălătorii.")
+        raise HTTPException(status_code=404, detail="Boxa nu existÄƒ sau nu aparÈ›ine acestei spÄƒlÄƒtorii.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 # 5. DELETE: DELETE /spalatorii/{id}/boxe/{boxa_id}
-@app.delete("/spalatorii/{spalatorie_id}/boxe/{boxa_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Șterge Boxă")
+@app.delete("/spalatorii/{spalatorie_id}/boxe/{boxa_id}", status_code=status.HTTP_204_NO_CONTENT, summary="È˜terge BoxÄƒ")
 def sterge_boxa(
     spalatorie_id: str,
     boxa_id: str
@@ -224,80 +216,12 @@ def sterge_boxa(
             .execute()
             
         if not response.data:
-             raise HTTPException(status_code=404, detail="Boxa nu a fost găsită.")
+             raise HTTPException(status_code=404, detail="Boxa nu a fost gÄƒsitÄƒ.")
         return None
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-# --- RUTE NOI PENTRU REZERVĂRI ---
-
-# 1. CREARE REZERVARE (POST)
-@app.post("/rezervari", status_code=status.HTTP_201_CREATED, response_model=RezervareResponse)
-def creare_rezervare(rezervare: RezervareCreate):
-    """
-    Creează o rezervare nouă. 
-    Dacă intervalul e ocupat, Supabase va returna automat o eroare (datorită regulii EXCLUDE).
-    """
-    try:
-        # Calculăm timpii în Python
-        start = datetime.now(timezone.utc)
-        sfarsit = start + timedelta(minutes=rezervare.durata_minute)
-        
-        data_insert = {
-            "boxa_id": rezervare.boxa_id,
-            "ora_start": start.isoformat(),
-            "ora_sfarsit": sfarsit.isoformat(),
-            "client_ref": rezervare.client_ref,
-            "status": "activa"
-        }
-
-        response = supabase.table('rezervari').insert(data_insert).execute()
-        
-        if response.data:
-            return response.data[0]
-        raise HTTPException(status_code=500, detail="Eroare server.")
-
-    except Exception as e:
-        # Prindem eroarea de la Supabase când intervalul e ocupat
-        if "conflicting key" in str(e) or "exclusion constraint" in str(e):
-            raise HTTPException(status_code=409, detail="Boxa este deja ocupată în acest moment!")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# 2. EARLY CHECKOUT (PATCH) - Aici este logica din imaginea ta!
-@app.patch("/rezervari/{rezervare_id}/checkout", response_model=RezervareResponse)
-def early_checkout(rezervare_id: str):
-    """
-    Clientul a terminat mai repede.
-    1. Oprim cronometrul (ora_sfarsit = ACUM).
-    2. Schimbăm statusul în 'finalizata'.
-    EFECT: Boxa devine instantaneu liberă pentru alții.
-    """
-    try:
-        now = datetime.now(timezone.utc).isoformat()
-        
-        response = supabase.table('rezervari').update({
-            "ora_sfarsit": now,
-            "status": "finalizata"
-        }).eq('rezervare_id', rezervare_id).execute()
-        
-        if response.data:
-            return response.data[0]
-        raise HTTPException(status_code=404, detail="Rezervarea nu a fost găsită.")
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# 3. LISTARE REZERVĂRI ACTIVE (Opțional, util pentru debug)
-@app.get("/rezervari/active", response_model=List[RezervareResponse])
-def get_rezervari_active():
-    try:
-        response = supabase.table('rezervari').select('*').eq('status', 'activa').execute()
-        return response.data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
