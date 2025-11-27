@@ -1,26 +1,32 @@
+Directory structure:
+└── Application1/
+    └── main.py
+
+================================================
+FILE: main.py
+================================================
 import os
-import re  # <--- NOU: Pentru validare format
 from fastapi import FastAPI, HTTPException, Query, Body, status
-from pydantic import BaseModel, field_validator # <--- MODIFICAT: Adaugă field_validator
+from pydantic import BaseModel
 from typing import List, Optional
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from datetime import datetime, timedelta, timezone
 from itertools import groupby
-from zoneinfo import ZoneInfo
+
 # --- 1. Configurare & Conexiune ---
 load_dotenv()
 
 app = FastAPI(
     title="QuickWash API V3",
-    description="Backend complet: Spălătorii, Boxe (CRUD Nested) și Rezervări Smart."
+    description="Backend complet: SpÄƒlÄƒtorii, Boxe (CRUD Nested) È™i RezervÄƒri Smart."
 )
 
 SUPABASE_URL: str = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY: str = os.environ.get("SUPABASE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-    raise RuntimeError("SUPABASE_URL sau SUPABASE_KEY lipsesc din fișierul .env")
+    raise RuntimeError("SUPABASE_URL sau SUPABASE_KEY lipsesc din fiÈ™ierul .env")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -29,28 +35,13 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # 2. MODELE DE DATE (Pydantic Schemas)
 # ==========================================
 
-# --- Spălătorii ---
+# --- SpÄƒlÄƒtorii ---
 class SpalatorieCreate(BaseModel):
     nume: str
     adresa: Optional[str] = None
-    
-    # MODIFICAT: Default explicit
-    program_functionare: str = "00:00 - 24:00"
-    
+    program_functionare: Optional[str] = "00:00 - 24:00"
     latitudine: float
     longitudine: float
-
-    # NOU: Validatorul care previne erorile de format
-    @field_validator('program_functionare')
-    @classmethod
-    def validate_program(cls, v: str) -> str:
-        if "non" in v.lower() and "stop" in v.lower():
-            return "00:00 - 24:00"
-        # Verifică formatul HH:MM - HH:MM
-        pattern = r"^\d{2}:\d{2}\s*-\s*\d{2}:\d{2}$"
-        if not re.match(pattern, v.strip()):
-            raise ValueError('Format invalid! Folosește strict "HH:MM - HH:MM" (ex: 08:00 - 22:00)')
-        return v
 
 class SpalatorieResponse(BaseModel):
     id: str
@@ -68,7 +59,7 @@ class BoxaBase(BaseModel):
     is_available: bool = True
 
 class BoxaCreate(BoxaBase):
-    # Luăm spalatorie_id din URL, nu din body
+    # LuÄƒm spalatorie_id din URL, nu din body
     pass
 
 class BoxaUpdate(BaseModel):
@@ -81,7 +72,7 @@ class BoxaResponse(BoxaBase):
     boxa_id: str
     spalatorie_id: str
 
-# --- Rezervări ---
+# --- RezervÄƒri ---
 class RezervareCreate(BaseModel):
     boxa_id: str
     durata_minute: int 
@@ -114,116 +105,49 @@ class SpalatorieDisponibilaResponse(BaseModel):
     distanta_km: Optional[float] = None
     boxe_libere: List[BoxaDisponibila]
 
-# ==========================================
-# 3. LOGICA DE BUSINESS (Helpers)
-# ==========================================
-
-# Funcție ajutătoare pentru citirea orelor din formatul "HH:MM - HH:MM"
-def parse_schedule(schedule_str: str):
-    if not schedule_str or "00:00 - 24:00" in schedule_str:
-        return 0, 24
-    try:
-        parts = schedule_str.split('-')
-        start = int(parts[0].strip().split(':')[0])
-        end = int(parts[1].strip().split(':')[0])
-        return start, end
-    except:
-        return 0, 24
-
-# Algoritmul complet cu FIX-ul pentru ora de închidere la final
-def calculeaza_gaps(
-    start_window_utc: datetime, 
-    end_window_utc: datetime, 
-    rezervari: list, 
-    durata_minima_minute: int,
-    program_str: str = "00:00 - 24:00"
-):
+# --- HELPER: Algoritmul de calculare a "gÄƒurilor" ---
+def calculeaza_gaps(start_window: datetime, end_window: datetime, rezervari: list, durata_minima_minute: int):
     gaps = []
-    
-    # 1. Setăm fusul orar (România)
-    try:
-        tz_ro = ZoneInfo("Europe/Bucharest")
-    except:
-        tz_ro = timezone.utc
+    current_time = start_window
 
-    # Ora curentă în România
-    now_ro = start_window_utc.astimezone(tz_ro)
-    
-    # Parsăm programul
-    ora_deschidere, ora_inchidere = parse_schedule(program_str)
-    
-    # 2. Ajustăm fereastra de start ("Clamping")
-    if now_ro.hour < ora_deschidere:
-        # Dacă e prea devreme, startul se mută la ora deschiderii
-        start_ro_adjusted = now_ro.replace(hour=ora_deschidere, minute=0, second=0)
-        start_window_utc = start_ro_adjusted.astimezone(timezone.utc)
-    elif now_ro.hour >= ora_inchidere and ora_inchidere != 24:
-        # Dacă e prea târziu, nu mai sunt locuri azi
-        return [] 
-
-    if start_window_utc >= end_window_utc:
-        return []
-
-    current_time = start_window_utc
-    
-    # Sortăm rezervările cronologic
+    # SortÄƒm rezervÄƒrile cronologic ca sÄƒ putem calcula spaÈ›iile dintre ele
+    # RezervÄƒrile vin din DB, ne asigurÄƒm cÄƒ sunt datetime objects
     rezervari_sorted = sorted(
         rezervari, 
         key=lambda x: datetime.fromisoformat(x['ora_start'])
     )
 
-    # Iterăm prin rezervări pentru a găsi spații ÎNTRE ele
     for res in rezervari_sorted:
         res_start = datetime.fromisoformat(res['ora_start'])
         res_end = datetime.fromisoformat(res['ora_sfarsit'])
 
+        # DacÄƒ rezervarea Ã®ncepe DUPÄ‚ momentul curent, avem o gaurÄƒ!
         if res_start > current_time:
-            # Logică de tăiere la ora închiderii
-            gap_start_ro = current_time.astimezone(tz_ro)
-            limit_end = res_start
-            
-            if ora_inchidere != 24:
-                ora_inchidere_azi = gap_start_ro.replace(hour=ora_inchidere, minute=0, second=0).astimezone(timezone.utc)
-                # Dacă rezervarea următoare începe DUPĂ închidere, tăiem gap-ul la închidere
-                if limit_end > ora_inchidere_azi:
-                    limit_end = ora_inchidere_azi
-            
-            if limit_end > current_time:
-                gap_duration = (limit_end - current_time).total_seconds() / 60
-                if gap_duration >= durata_minima_minute:
-                    gaps.append({
-                        "start": current_time,
-                        "end": limit_end,
-                        "minute_disponibile": int(gap_duration)
-                    })
-
-        if res_end > current_time:
-            current_time = res_end
-
-    # 3. Gap final (după ultima rezervare până la finalul ferestrei cerute)
-    if current_time < end_window_utc:
-        limit_end = end_window_utc
-        
-        # FIX APLICAT AICI: Verificăm programul de închidere pentru gap-ul final
-        if ora_inchidere != 24:
-             gap_start_ro = current_time.astimezone(tz_ro)
-             ora_inchidere_azi = gap_start_ro.replace(hour=ora_inchidere, minute=0, second=0).astimezone(timezone.utc)
-             
-             # Dacă fereastra cerută se termină DUPĂ închidere, tăiem la ora închiderii
-             if limit_end > ora_inchidere_azi:
-                 limit_end = ora_inchidere_azi
-
-        # Doar dacă a mai rămas timp valid după tăiere, adăugăm gap-ul
-        if limit_end > current_time:
-            gap_duration = (limit_end - current_time).total_seconds() / 60
+            gap_duration = (res_start - current_time).total_seconds() / 60
             if gap_duration >= durata_minima_minute:
                 gaps.append({
                     "start": current_time,
-                    "end": limit_end,
+                    "end": res_start,
                     "minute_disponibile": int(gap_duration)
                 })
+        
+        # MutÄƒm cursorul de timp dupÄƒ rezervarea curentÄƒ
+        # (Dar ne asigurÄƒm cÄƒ nu mergem Ã®napoi Ã®n timp, Ã®n caz de suprapuneri ciudate)
+        if res_end > current_time:
+            current_time = res_end
+
+    # VerificÄƒm spaÈ›iul de dupÄƒ ultima rezervare pÃ¢nÄƒ la finalul ferestrei
+    if current_time < end_window:
+        gap_duration = (end_window - current_time).total_seconds() / 60
+        if gap_duration >= durata_minima_minute:
+            gaps.append({
+                "start": current_time,
+                "end": end_window,
+                "minute_disponibile": int(gap_duration)
+            })
             
     return gaps
+
 
 # ==========================================
 # 3. RUTE API (Endpoints)
@@ -234,10 +158,10 @@ def read_root():
     return {"status": "QuickWash API este live!"}
 
 # ---------------------------
-# A. SPĂLĂTORII
+# A. SPÄ‚LÄ‚TORII
 # ---------------------------
 
-@app.post("/spalatorii", status_code=status.HTTP_201_CREATED, summary="Adaugă Spălătorie")
+@app.post("/spalatorii", status_code=status.HTTP_201_CREATED, summary="AdaugÄƒ SpÄƒlÄƒtorie")
 def add_spalatorie(spalatorie: SpalatorieCreate = Body(...)):
     try:
         data = spalatorie.model_dump()
@@ -254,11 +178,11 @@ def add_spalatorie(spalatorie: SpalatorieCreate = Body(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/spalatorii-apropiate", response_model=List[SpalatorieResponse], summary="Căutare Geo")
+@app.get("/spalatorii-apropiate", response_model=List[SpalatorieResponse], summary="CÄƒutare Geo")
 def get_spalatorii_apropiate(
     lat: float = Query(..., description="Lat user"),
     lon: float = Query(..., description="Lon user"),
-    raza_km: float = Query(5.0, description="Raza în km")
+    raza_km: float = Query(5.0, description="Raza Ã®n km")
 ):
     try:
         response = supabase.rpc(
@@ -295,7 +219,7 @@ def get_single_boxa(spalatorie_id: str, boxa_id: str):
         
         if response.data:
             return response.data[0]
-        raise HTTPException(status_code=404, detail="Boxa nu a fost găsită.")
+        raise HTTPException(status_code=404, detail="Boxa nu a fost gÄƒsitÄƒ.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -312,7 +236,7 @@ def adauga_boxa(spalatorie_id: str, boxa: BoxaCreate = Body(...)):
         raise HTTPException(status_code=500, detail="Eroare la creare.")
     except Exception as e:
         if "foreign key" in str(e):
-            raise HTTPException(status_code=404, detail="Spălătoria nu există.")
+            raise HTTPException(status_code=404, detail="SpÄƒlÄƒtoria nu existÄƒ.")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.patch("/spalatorii/{spalatorie_id}/boxe/{boxa_id}", response_model=BoxaResponse)
@@ -320,7 +244,7 @@ def update_boxa(spalatorie_id: str, boxa_id: str, boxa_update: BoxaUpdate):
     try:
         update_data = boxa_update.model_dump(exclude_unset=True)
         if not update_data:
-            raise HTTPException(status_code=400, detail="Fără date de update.")
+            raise HTTPException(status_code=400, detail="FÄƒrÄƒ date de update.")
 
         response = supabase.table('boxe').update(update_data)\
             .eq('boxa_id', boxa_id)\
@@ -329,7 +253,7 @@ def update_boxa(spalatorie_id: str, boxa_id: str, boxa_update: BoxaUpdate):
         
         if response.data:
             return response.data[0]
-        raise HTTPException(status_code=404, detail="Boxa nu există.")
+        raise HTTPException(status_code=404, detail="Boxa nu existÄƒ.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -341,36 +265,36 @@ def sterge_boxa(spalatorie_id: str, boxa_id: str):
             .eq('spalatorie_id', spalatorie_id)\
             .execute()
         if not response.data:
-             raise HTTPException(status_code=404, detail="Boxa nu a fost găsită.")
+             raise HTTPException(status_code=404, detail="Boxa nu a fost gÄƒsitÄƒ.")
         return None
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 # ---------------------------
-# C. REZERVĂRI (Smart Logic)
+# C. REZERVÄ‚RI (Smart Logic)
 # ---------------------------
 
 @app.post("/rezervari", status_code=status.HTTP_201_CREATED, response_model=RezervareResponse)
 def creare_rezervare(rezervare: RezervareCreate):
     """
-    Creează o rezervare. 
-    Completează automat ID-ul spălătoriei pentru istoric.
+    CreeazÄƒ o rezervare. 
+    CompleteazÄƒ automat ID-ul spÄƒlÄƒtoriei pentru istoric.
     """
     try:
-        # 1. Căutăm ID-ul spălătoriei (Părintele boxei)
+        # 1. CÄƒutÄƒm ID-ul spÄƒlÄƒtoriei (PÄƒrintele boxei)
         boxa_info = supabase.table('boxe').select('spalatorie_id').eq('boxa_id', rezervare.boxa_id).execute()
         
         if not boxa_info.data:
-            raise HTTPException(status_code=404, detail="Boxa specificată nu există.")
+            raise HTTPException(status_code=404, detail="Boxa specificatÄƒ nu existÄƒ.")
             
         real_spalatorie_id = boxa_info.data[0]['spalatorie_id']
 
-        # 2. Calculăm timpii
+        # 2. CalculÄƒm timpii
         start = datetime.now(timezone.utc)
         sfarsit = start + timedelta(minutes=rezervare.durata_minute)
         
-        # 3. Inserăm cu TOATE datele necesare
+        # 3. InserÄƒm cu TOATE datele necesare
         data_insert = {
             "boxa_id": rezervare.boxa_id,
             "spalatorie_id": real_spalatorie_id, # Completat automat
@@ -389,14 +313,14 @@ def creare_rezervare(rezervare: RezervareCreate):
     except Exception as e:
         # Prindem eroarea de suprapunere (Exclusion Constraint)
         if "conflicting key" in str(e) or "exclusion constraint" in str(e):
-            raise HTTPException(status_code=409, detail="Boxa este deja ocupată în acest moment!")
+            raise HTTPException(status_code=409, detail="Boxa este deja ocupatÄƒ Ã®n acest moment!")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.patch("/rezervari/{rezervare_id}/checkout", response_model=RezervareResponse)
 def early_checkout(rezervare_id: str):
     """
-    Eliberează boxa mai devreme.
+    ElibereazÄƒ boxa mai devreme.
     """
     try:
         now = datetime.now(timezone.utc).isoformat()
@@ -408,7 +332,7 @@ def early_checkout(rezervare_id: str):
         
         if response.data:
             return response.data[0]
-        raise HTTPException(status_code=404, detail="Rezervarea nu a fost găsită.")
+        raise HTTPException(status_code=404, detail="Rezervarea nu a fost gÄƒsitÄƒ.")
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -422,29 +346,29 @@ def get_rezervari_active():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-#DISPONIBILITATE BOXE ȘI SPĂLĂTORII
+#DISPONIBILITATE BOXE È˜I SPÄ‚LÄ‚TORII
 @app.get("/spalatorii/{spalatorie_id}/disponibilitate", response_model=List[BoxaDisponibila])
 def get_disponibilitate_spalatorie(
     spalatorie_id: str,
-    durata_dorita_min: int = Query(30, description="Cât timp vrei să speli?"),
-    fereastra_ore: int = Query(2, description="Cât de departe în viitor căutăm?")
+    durata_dorita_min: int = Query(30, description="CÃ¢t timp vrei sÄƒ speli?"),
+    fereastra_ore: int = Query(2, description="CÃ¢t de departe Ã®n viitor cÄƒutÄƒm?")
 ):
     """
-    Returnează intervalele orare disponibile pentru toate boxele unei spălătorii
-    în următoarele X ore (default 2).
+    ReturneazÄƒ intervalele orare disponibile pentru toate boxele unei spÄƒlÄƒtorii
+    Ã®n urmÄƒtoarele X ore (default 2).
     """
     try:
         # 1. Definim fereastra de timp (Acum -> Acum + 2h)
         now = datetime.now(timezone.utc)
         end_window = now + timedelta(hours=fereastra_ore)
 
-        # 2. Luăm toate boxele spălătoriei
+        # 2. LuÄƒm toate boxele spÄƒlÄƒtoriei
         boxe = supabase.table('boxe').select('*').eq('spalatorie_id', spalatorie_id).eq('is_available', True).execute()
         if not boxe.data:
-            return [] # Nicio boxă funcțională
+            return [] # Nicio boxÄƒ funcÈ›ionalÄƒ
 
-        # 3. Luăm toate rezervările ACTIVE din acest interval pentru această spălătorie
-        # Filtrăm să se intersecteze cu fereastra noastră
+        # 3. LuÄƒm toate rezervÄƒrile ACTIVE din acest interval pentru aceastÄƒ spÄƒlÄƒtorie
+        # FiltrÄƒm sÄƒ se intersecteze cu fereastra noastrÄƒ
         rezervari = supabase.table('rezervari')\
             .select('boxa_id, ora_start, ora_sfarsit')\
             .eq('spalatorie_id', spalatorie_id)\
@@ -457,9 +381,9 @@ def get_disponibilitate_spalatorie(
 
         rezultat = []
 
-        # 4. Pentru fiecare boxă, calculăm golurile
+        # 4. Pentru fiecare boxÄƒ, calculÄƒm golurile
         for boxa in boxe.data:
-            # Filtrăm rezervările doar pentru boxa curentă
+            # FiltrÄƒm rezervÄƒrile doar pentru boxa curentÄƒ
             rezervari_boxa = [r for r in rezervari_list if r['boxa_id'] == boxa['boxa_id']]
             
             gaps = calculeaza_gaps(now, end_window, rezervari_boxa, durata_dorita_min)
@@ -485,12 +409,12 @@ def get_spalatorii_apropiate_disponibile(
     durata_dorita_min: int = 30
 ):
     """
-    Cea mai complexă rută:
-    1. Găsește spălătoriile apropiate.
-    2. Pentru fiecare, verifică dacă are MĂCAR O BOXĂ liberă ACUM (sau în curând).
+    Cea mai complexÄƒ rutÄƒ:
+    1. GÄƒseÈ™te spÄƒlÄƒtoriile apropiate.
+    2. Pentru fiecare, verificÄƒ dacÄƒ are MÄ‚CAR O BOXÄ‚ liberÄƒ ACUM (sau Ã®n curÃ¢nd).
     """
     try:
-        # 1. Găsim spălătoriile fizice (Geospatial)
+        # 1. GÄƒsim spÄƒlÄƒtoriile fizice (Geospatial)
         locatii = supabase.rpc(
             'gaseste_apropiate',
             {'user_lat': lat, 'user_lon': lon, 'raza_km': raza_km}
@@ -501,11 +425,12 @@ def get_spalatorii_apropiate_disponibile(
 
         spalatorii_ids = [s['id'] for s in locatii.data]
         
-        # 2. Definim fereastra (Următoarele 2 ore e standardul nostru)
+        # 2. Definim fereastra (UrmÄƒtoarele 2 ore e standardul nostru)
         now = datetime.now(timezone.utc)
         end_window = now + timedelta(hours=2)
 
-        # 3. Luăm BULK toate boxele și rezervările pentru aceste spălătorii
+        # 3. LuÄƒm BULK toate boxele È™i rezervÄƒrile pentru aceste spÄƒlÄƒtorii
+        # (Optimizare: facem 2 query-uri mari Ã®n loc de 50 mici)
         boxe_all = supabase.table('boxe').select('*').in_('spalatorie_id', spalatorii_ids).eq('is_available', True).execute()
         
         rezervari_all = supabase.table('rezervari')\
@@ -516,24 +441,19 @@ def get_spalatorii_apropiate_disponibile(
             .lte('ora_start', end_window.isoformat())\
             .execute()
 
-        # 4. Procesăm datele în Python
+        # 4. ProcesÄƒm datele Ã®n Python
         rezultat_final = []
 
         for loc in locatii.data:
-            # MODIFICARE AICI: Extragem programul din rezultatele RPC
-            program = loc.get('program_functionare', "00:00 - 24:00")
-            if not program: program = "00:00 - 24:00"
-
-            # Găsim boxele acestei locații
+            # GÄƒsim boxele acestei locaÈ›ii
             boxe_locatie = [b for b in boxe_all.data if b['spalatorie_id'] == loc['id']]
             boxe_cu_gaps = []
 
             for boxa in boxe_locatie:
-                # Găsim rezervările acestei boxe
+                # GÄƒsim rezervÄƒrile acestei boxe
                 rez_boxa = [r for r in rezervari_all.data if r['boxa_id'] == boxa['boxa_id']]
                 
-                # MODIFICARE AICI: Pasăm program_str către algoritm
-                gaps = calculeaza_gaps(now, end_window, rez_boxa, durata_dorita_min, program_str=program)
+                gaps = calculeaza_gaps(now, end_window, rez_boxa, durata_dorita_min)
                 
                 if gaps:
                     boxe_cu_gaps.append({
@@ -543,7 +463,7 @@ def get_spalatorii_apropiate_disponibile(
                         "intervale": gaps
                     })
             
-            # Adăugăm spălătoria în listă DOAR dacă are boxe disponibile
+            # AdÄƒugÄƒm spÄƒlÄƒtoria Ã®n listÄƒ DOAR dacÄƒ are boxe disponibile
             if boxe_cu_gaps:
                 rezultat_final.append({
                     "spalatorie_id": loc['id'],
@@ -558,29 +478,22 @@ def get_spalatorii_apropiate_disponibile(
         print(f"Eroare: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- Ruta Detaliată: Disponibilitate per Spălătorie ---
+# --- Ruta DetaliatÄƒ: Disponibilitate per SpÄƒlÄƒtorie ---
 
 @app.get("/spalatorii/{spalatorie_id}/disponibilitate", response_model=List[BoxaDisponibila])
 def get_disponibilitate_spalatorie(
     spalatorie_id: str,
-    durata_dorita_min: int = Query(30, description="Cât timp vrei să speli?"),
-    fereastra_ore: int = Query(2, description="Cât de departe în viitor căutăm?")
+    durata_dorita_min: int = Query(30, description="CÃ¢t timp vrei sÄƒ speli?"),
+    fereastra_ore: int = Query(2, description="CÃ¢t de departe Ã®n viitor cÄƒutÄƒm?")
 ):
     """
-    Returnează intervalele orare disponibile pentru TOATE boxele unei spălătorii specifice.
+    ReturneazÄƒ intervalele orare disponibile pentru TOATE boxele unei spÄƒlÄƒtorii specifice.
     """
     try:
         now = datetime.now(timezone.utc)
         end_window = now + timedelta(hours=fereastra_ore)
 
-        # MODIFICARE AICI: Luăm programul spălătoriei din DB
-        spalatorie_query = supabase.table('spalatorii').select('program_functionare').eq('id', spalatorie_id).execute()
-        program = "00:00 - 24:00"
-        if spalatorie_query.data:
-            program = spalatorie_query.data[0].get('program_functionare', "00:00 - 24:00")
-            if not program: program = "00:00 - 24:00"
-
-        # 1. Luăm boxele active ale spălătoriei
+        # 1. LuÄƒm boxele active ale spÄƒlÄƒtoriei
         boxe = supabase.table('boxe').select('*')\
             .eq('spalatorie_id', spalatorie_id)\
             .eq('is_available', True)\
@@ -589,7 +502,7 @@ def get_disponibilitate_spalatorie(
         if not boxe.data:
             return []
 
-        # 2. Luăm rezervările active pentru această spălătorie
+        # 2. LuÄƒm rezervÄƒrile active pentru aceastÄƒ spÄƒlÄƒtorie
         rezervari = supabase.table('rezervari')\
             .select('boxa_id, ora_start, ora_sfarsit')\
             .eq('spalatorie_id', spalatorie_id)\
@@ -601,12 +514,10 @@ def get_disponibilitate_spalatorie(
         rezervari_list = rezervari.data
         rezultat = []
 
-        # 3. Calculăm golurile pentru fiecare boxă
+        # 3. CalculÄƒm golurile pentru fiecare boxÄƒ
         for boxa in boxe.data:
             rez_boxa = [r for r in rezervari_list if r['boxa_id'] == boxa['boxa_id']]
-            
-            # MODIFICARE AICI: Pasăm programul extras mai sus
-            gaps = calculeaza_gaps(now, end_window, rez_boxa, durata_dorita_min, program_str=program)
+            gaps = calculeaza_gaps(now, end_window, rez_boxa, durata_dorita_min)
             
             if gaps:
                 rezultat.append({
@@ -620,7 +531,8 @@ def get_disponibilitate_spalatorie(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
