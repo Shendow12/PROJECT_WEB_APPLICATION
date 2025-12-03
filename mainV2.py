@@ -7,13 +7,22 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo # Necesită Python 3.9+
-
+from fastapi.middleware.cors import CORSMiddleware
 # --- 1. Configurare & Conexiune ---
 load_dotenv()
 
 app = FastAPI(
     title="QuickWash MVP",
     description="Backend Final: Fără Auth, Rezervare Smart, Validare Program."
+)
+
+# Permitem oricărui frontend (Bolt, Localhost) să acceseze API-ul
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # În producție pui doar domeniul tău, pt dev lăsăm "*"
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 SUPABASE_URL: str = os.environ.get("SUPABASE_URL")
