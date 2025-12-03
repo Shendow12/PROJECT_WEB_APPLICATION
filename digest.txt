@@ -1,3 +1,14 @@
+Directory structure:
+└── Application1/
+    ├── mainV2.py
+    └── requirements.txt
+
+
+
+
+================================================
+FILE: mainV2.py
+================================================
 import os
 import re
 from fastapi import FastAPI, HTTPException, Query, Body, status
@@ -6,20 +17,20 @@ from typing import List, Optional
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo # Necesită Python 3.9+
+from zoneinfo import ZoneInfo # NecesitÄƒ Python 3.9+
 from fastapi.middleware.cors import CORSMiddleware
 # --- 1. Configurare & Conexiune ---
 load_dotenv()
 
 app = FastAPI(
     title="QuickWash MVP",
-    description="Backend Final: Fără Auth, Rezervare Smart, Validare Program."
+    description="Backend Final: FÄƒrÄƒ Auth, Rezervare Smart, Validare Program."
 )
 
-# Permitem oricărui frontend (Bolt, Localhost) să acceseze API-ul
+# Permitem oricÄƒrui frontend (Bolt, Localhost) sÄƒ acceseze API-ul
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # În producție pui doar domeniul tău, pt dev lăsăm "*"
+    allow_origins=["*"],  # ÃŽn producÈ›ie pui doar domeniul tÄƒu, pt dev lÄƒsÄƒm "*"
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -29,7 +40,7 @@ SUPABASE_URL: str = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY: str = os.environ.get("SUPABASE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-    raise RuntimeError("SUPABASE_URL sau SUPABASE_KEY lipsesc din fișierul .env")
+    raise RuntimeError("SUPABASE_URL sau SUPABASE_KEY lipsesc din fiÈ™ierul .env")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -38,12 +49,12 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # 2. MODELE DE DATE (Pydantic Schemas)
 # ==========================================
 
-# --- Spălătorii ---
+# --- SpÄƒlÄƒtorii ---
 class SpalatorieCreate(BaseModel):
     nume: str
     adresa: Optional[str] = None
     
-    # Validăm formatul programului
+    # ValidÄƒm formatul programului
     program_functionare: str = "00:00 - 24:00"
     
     latitudine: float
@@ -57,7 +68,7 @@ class SpalatorieCreate(BaseModel):
         
         pattern = r"^\d{2}:\d{2}\s*-\s*\d{2}:\d{2}$"
         if not re.match(pattern, v.strip()):
-            raise ValueError('Format invalid! Folosește strict "HH:MM - HH:MM" (ex: 08:00 - 22:00)')
+            raise ValueError('Format invalid! FoloseÈ™te strict "HH:MM - HH:MM" (ex: 08:00 - 22:00)')
         return v
 
 class SpalatorieResponse(BaseModel):
@@ -65,7 +76,6 @@ class SpalatorieResponse(BaseModel):
     nume: str
     adresa: Optional[str]
     program_functionare: Optional[str]
-    # Acestea sunt CRITICE:
     latitudine: float
     longitudine: float
     distanta_km: Optional[float] = None
@@ -90,11 +100,11 @@ class BoxaResponse(BoxaBase):
     boxa_id: str
     spalatorie_id: str
 
-# --- Rezervări (Fără User ID) ---
+# --- RezervÄƒri (FÄƒrÄƒ User ID) ---
 class RezervareCreate(BaseModel):
     boxa_id: str
     durata_minute: int 
-    # OBLIGATORIU: Telefon sau Nr. Înmatriculare (Identitatea clientului)
+    # OBLIGATORIU: Telefon sau Nr. ÃŽnmatriculare (Identitatea clientului)
     client_ref: str 
 
 class RezervareResponse(BaseModel):
@@ -149,10 +159,10 @@ def calculeaza_gaps(
     durata_minima_minute: int,
     program_str: str = "00:00 - 24:00"
 ):
-    """ Algoritmul Smart care ține cont de fus orar RO și program. """
+    """ Algoritmul Smart care È›ine cont de fus orar RO È™i program. """
     gaps = []
     
-    # 1. Fus Orar România
+    # 1. Fus Orar RomÃ¢nia
     try:
         tz_ro = ZoneInfo("Europe/Bucharest")
     except:
@@ -161,7 +171,7 @@ def calculeaza_gaps(
     now_ro = start_window_utc.astimezone(tz_ro)
     ora_deschidere, ora_inchidere = parse_schedule(program_str)
     
-    # 2. Ajustăm fereastra de start (Clamping)
+    # 2. AjustÄƒm fereastra de start (Clamping)
     if now_ro.hour < ora_deschidere:
         start_ro_adjusted = now_ro.replace(hour=ora_deschidere, minute=0, second=0)
         start_window_utc = start_ro_adjusted.astimezone(timezone.utc)
@@ -183,7 +193,7 @@ def calculeaza_gaps(
         res_end = datetime.fromisoformat(res['ora_sfarsit'])
 
         if res_start > current_time:
-            # Tăiem la ora închiderii
+            # TÄƒiem la ora Ã®nchiderii
             gap_start_ro = current_time.astimezone(tz_ro)
             limit_end = res_start
             
@@ -234,7 +244,7 @@ def calculeaza_gaps(
 def read_root():
     return {"status": "QuickWash API este live!"}
 
-# --- A. SPĂLĂTORII ---
+# --- A. SPÄ‚LÄ‚TORII ---
 
 @app.post("/spalatorii", status_code=status.HTTP_201_CREATED)
 def add_spalatorie(spalatorie: SpalatorieCreate = Body(...)):
@@ -256,7 +266,7 @@ def get_spalatorii_apropiate_disponibile(
     lat: float, lon: float, raza_km: float = 5.0, durata_dorita_min: int = 30
 ):
     try:
-        # 1. Căutare Geo (RPC)
+        # 1. CÄƒutare Geo (RPC)
         locatii = supabase.rpc('gaseste_apropiate', {'user_lat': lat, 'user_lon': lon, 'raza_km': raza_km}).execute()
         if not locatii.data: return []
 
@@ -327,22 +337,22 @@ def sterge_boxa(spalatorie_id: str, boxa_id: str):
         supabase.table('boxe').delete().eq('boxa_id', boxa_id).execute()
     except Exception as e: raise HTTPException(500, str(e))
 
-# --- C. REZERVĂRI (NO AUTH) ---
+# --- C. REZERVÄ‚RI (NO AUTH) ---
 
 @app.post("/rezervari", status_code=status.HTTP_201_CREATED, response_model=RezervareResponse)
 def creare_rezervare(rezervare: RezervareCreate):
     try:
-        # 1. Aflăm locația
+        # 1. AflÄƒm locaÈ›ia
         boxa_info = supabase.table('boxe').select('spalatorie_id').eq('boxa_id', rezervare.boxa_id).execute()
         if not boxa_info.data:
-            raise HTTPException(status_code=404, detail="Boxa nu există.")
+            raise HTTPException(status_code=404, detail="Boxa nu existÄƒ.")
         real_spalatorie_id = boxa_info.data[0]['spalatorie_id']
 
-        # 2. Calculăm timpii
+        # 2. CalculÄƒm timpii
         start = datetime.now(timezone.utc)
         sfarsit = start + timedelta(minutes=rezervare.durata_minute)
         
-        # 3. Inserăm (Fără user_id, doar client_ref)
+        # 3. InserÄƒm (FÄƒrÄƒ user_id, doar client_ref)
         data_insert = {
             "boxa_id": rezervare.boxa_id,
             "spalatorie_id": real_spalatorie_id,
@@ -357,7 +367,7 @@ def creare_rezervare(rezervare: RezervareCreate):
 
     except Exception as e:
         if "conflict" in str(e).lower() or "exclusion" in str(e).lower():
-            raise HTTPException(status_code=409, detail="Boxa este deja ocupată!")
+            raise HTTPException(status_code=409, detail="Boxa este deja ocupatÄƒ!")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.patch("/rezervari/{rezervare_id}/checkout")
@@ -366,10 +376,10 @@ def early_checkout(rezervare_id: str):
         now = datetime.now(timezone.utc).isoformat()
         r = supabase.table('rezervari').update({"ora_sfarsit": now, "status": "finalizata"}).eq('rezervare_id', rezervare_id).execute()
         if r.data: return r.data[0]
-        raise HTTPException(404, "Nu există")
+        raise HTTPException(404, "Nu existÄƒ")
     except Exception as e: raise HTTPException(500, str(e))
 
-# --- D. Disponibilitate Detaliată ---
+# --- D. Disponibilitate DetaliatÄƒ ---
 @app.get("/spalatorii/{spalatorie_id}/disponibilitate", response_model=List[BoxaDisponibila])
 def get_disponibilitate_spalatorie(
     spalatorie_id: str,
@@ -407,3 +417,10 @@ def get_disponibilitate_spalatorie(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+================================================
+FILE: requirements.txt
+================================================
+[Binary file]
+
