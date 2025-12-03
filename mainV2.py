@@ -60,16 +60,6 @@ class SpalatorieCreate(BaseModel):
             raise ValueError('Format invalid! Folosește strict "HH:MM - HH:MM" (ex: 08:00 - 22:00)')
         return v
 
-class SpalatorieResponse(BaseModel):
-    id: str
-    nume: str
-    adresa: Optional[str]
-    program_functionare: Optional[str]
-    # Acestea sunt CRITICE:
-    latitudine: float
-    longitudine: float
-    distanta_km: Optional[float] = None
-
 # --- Boxe ---
 class BoxaBase(BaseModel):
     nume_boxa: str
@@ -106,23 +96,27 @@ class RezervareResponse(BaseModel):
     status: str
     client_ref: str
 
-# --- Disponibilitate ---
+# --- Modele pentru disponibilitate ---
 class IntervalLiber(BaseModel):
     start: datetime
     end: datetime
     minute_disponibile: int
 
+# ACEASTA TREBUIE SĂ FIE PRIMA
 class BoxaDisponibila(BaseModel):
     boxa_id: str
     nume_boxa: str
     pret_rezervare_lei: float
     intervale: List[IntervalLiber]
 
+# ACEASTA O FOLOSEȘTE PE CEA DE MAI SUS
 class SpalatorieDisponibilaResponse(BaseModel):
     spalatorie_id: str
     nume: str
     program_functionare: str
     distanta_km: Optional[float] = None
+    latitudine: float
+    longitudine: float
     boxe_libere: List[BoxaDisponibila]
 
 
@@ -291,7 +285,13 @@ def get_spalatorii_apropiate_disponibile(
                 rezultat_final.append({
                     "spalatorie_id": loc['id'],
                     "nume": loc['nume'],
+                    
+                    # --- LINII NOI PENTRU MAPARE ---
                     "program_functionare": program,
+                    "latitudine": loc['latitudine'],   # Luăm din RPC
+                    "longitudine": loc['longitudine'], # Luăm din RPC
+                    # -------------------------------
+                    
                     "distanta_km": loc['distanta_km'],
                     "boxe_libere": boxe_cu_gaps
                 })
