@@ -404,6 +404,55 @@ def get_disponibilitate_spalatorie(
         return rezultat
     except Exception as e: raise HTTPException(500, str(e))
 
+# ---------------------------
+# D. ADMIN & ISTORIC (Rute Noi)
+# ---------------------------
+
+@app.get("/rezervari", response_model=List[RezervareResponse], summary="Toate Rezervările (Admin)")
+def get_toate_rezervarile(
+    client_ref: Optional[str] = Query(None, description="Filtrează după nr. telefon/auto")
+):
+    """
+    Returnează lista tuturor rezervărilor din sistem.
+    Opțional: poți filtra după un client specific.
+    """
+    try:
+        query = supabase.table('rezervari').select('*')
+        
+        # Dacă am primit un client_ref, filtrăm (Istoric Client)
+        if client_ref:
+            query = query.eq('client_ref', client_ref)
+            
+        # Ordonăm descrescător (cele mai noi primele)
+        response = query.order('ora_start', desc=True).execute()
+        
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/spalatorii/{spalatorie_id}/rezervari", response_model=List[RezervareResponse], summary="Rezervări per Spălătorie")
+def get_rezervari_spalatorie(
+    spalatorie_id: str,
+    doar_active: bool = Query(False, description="Dacă true, arată doar ce urmează")
+):
+    """
+    Returnează toate rezervările pentru o anumită spălătorie.
+    Util pentru dashboard-ul proprietarului.
+    """
+    try:
+        query = supabase.table('rezervari').select('*').eq('spalatorie_id', spalatorie_id)
+        
+        if doar_active:
+            # Arată doar ce nu a expirat încă
+            now = datetime.now(timezone.utc).isoformat()
+            query = query.eq('status', 'activa').gte('ora_sfarsit', now)
+            
+        response = query.order('ora_start', desc=True).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
