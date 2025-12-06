@@ -143,30 +143,76 @@ def calculeaza_gaps(
     durata_minima_minute: int,
     program_str: str = "00:00 - 24:00"
 ):
-    """ Algoritmul Smart care ține cont de fus orar RO și program. """
     gaps = []
     
-    # 1. Fus Orar România
-    try:
-        tz_ro = ZoneInfo("Europe/Bucharest")
-    except:
-        tz_ro = timezone.utc
-
-    now_ro = start_window_utc.astimezone(tz_ro)
+    # 1. Ora României (Manual Offset pentru siguranță pe Render)
+    RO_OFFSET = timezone(timedelta(hours=2)) 
+    now_ro = start_window_utc.astimezone(RO_OFFSET)
+    
     ora_deschidere, ora_inchidere = parse_schedule(program_str)
     
-    # 2. Ajustăm fereastra de start (Clamping)
-    if now_ro.hour < ora_deschidere:
-        start_ro_adjusted = now_ro.replace(hour=ora_deschidere, minute=0, second=0)
-        start_window_utc = start_ro_adjusted.astimezone(timezone.utc)
-    elif now_ro.hour >= ora_inchidere and ora_inchidere != 24:
-        return [] 
+    # 2. Determinăm intervalele de funcționare pentru "AZI"
+    # Un program poate fi continuu (8-20) sau spart de miezul nopții (10-02)
+    open_intervals = [] # Lista de tupluri (start_hour, end_hour)
+    
+    if ora_deschidere < ora_inchidere:
+        # Program normal (ex: 08:00 - 22:00)
+        open_intervals.append((ora_deschidere, ora_inchidere))
+    elif ora_deschidere > ora_inchidere:
+        # Program peste noapte (ex: 10:00 - 02:00)
+        # Interval 1: 00:00 - 02:00 (dimineața devreme)
+        open_intervals.append((0, ora_inchidere))
+        # Interval 2: 10:00 - 24:00 (ziua și seara)
+        open_intervals.append((ora_deschidere, 24))
+    else:
+        # Non-stop sau 00-24 sau 08-08
+        open_intervals.append((0, 24))
 
-    if start_window_utc >= end_window_utc:
+    # 3. Verificăm dacă suntem într-un interval deschis ACUM
+    # Sau ajustăm startul la următorul interval deschis
+    adjusted_start_utc = None
+    current_hour = now_ro.hour + (now_ro.minute / 60)
+    
+    is_open_now = False
+    next_open_hour = None
+    
+    # Căutăm unde ne încadrăm
+    for (start_h, end_h) in open_intervals:
+        # Suntem în interval?
+        if start_h <= current_hour < end_h:
+            is_open_now = True
+            # Limita de închidere curentă
+            current_closing_hour = end_h
+            break
+        
+        # Dacă nu suntem, care e următorul start?
+        if start_h > current_hour:
+            if next_open_hour is None or start_h < next_open_hour:
+                next_open_hour = start_h
+                current_closing_hour = end_h
+
+    if is_open_now:
+        # Suntem deschiși, păstrăm ora curentă
+        adjusted_start_utc = start_window_utc
+    elif next_open_hour is not None:
+        # Suntem închiși, dar deschidem mai târziu azi
+        # Ajustăm startul la ora deschiderii
+        target_h = int(next_open_hour)
+        target_m = int((next_open_hour - target_h) * 60)
+        start_ro_adjusted = now_ro.replace(hour=target_h, minute=target_m, second=0)
+        adjusted_start_utc = start_ro_adjusted.astimezone(timezone.utc)
+    else:
+        # S-a închis pe ziua de azi (și nu mai deschide până la 24:00)
         return []
 
-    current_time = start_window_utc
+    # Verificăm dacă ajustarea a depășit fereastra de căutare
+    if adjusted_start_utc >= end_window_utc:
+        return []
+
+    # Setăm cursorul
+    current_time = adjusted_start_utc
     
+    # 4. Calculul efectiv al găurilor (Iterare printre rezervări)
     rezervari_sorted = sorted(
         rezervari, 
         key=lambda x: datetime.fromisoformat(x['ora_start'])
@@ -177,14 +223,24 @@ def calculeaza_gaps(
         res_end = datetime.fromisoformat(res['ora_sfarsit'])
 
         if res_start > current_time:
-            # Tăiem la ora închiderii
-            gap_start_ro = current_time.astimezone(tz_ro)
+            # Avem un potențial gap. Trebuie să îl tăiem la ora închiderii curente
+            # 'current_closing_hour' e ora la care se termină tura curentă (ex: 22:00 sau 02:00 sau 24:00)
+            
+            gap_start_ro = current_time.astimezone(RO_OFFSET)
             limit_end = res_start
             
-            if ora_inchidere != 24:
-                ora_inchidere_azi = gap_start_ro.replace(hour=ora_inchidere, minute=0, second=0).astimezone(timezone.utc)
-                if limit_end > ora_inchidere_azi:
-                    limit_end = ora_inchidere_azi
+            # Calculăm timestamp-ul orei de închidere pentru AZI
+            if current_closing_hour != 24:
+                h_close = int(current_closing_hour)
+                m_close = int((current_closing_hour - h_close) * 60)
+                
+                # Atenție: dacă ora de închidere e mâine (teoretic nu ajungem aici pt că am spart intervalele pe zile)
+                # Dar pentru siguranță, folosim data curentă a gap-ului
+                ora_inchidere_azi_ro = gap_start_ro.replace(hour=h_close, minute=m_close, second=0)
+                ora_inchidere_azi_utc = ora_inchidere_azi_ro.astimezone(timezone.utc)
+                
+                if limit_end > ora_inchidere_azi_utc:
+                    limit_end = ora_inchidere_azi_utc
             
             if limit_end > current_time:
                 gap_duration = (limit_end - current_time).total_seconds() / 60
@@ -198,15 +254,20 @@ def calculeaza_gaps(
         if res_end > current_time:
             current_time = res_end
 
-    # Gap final
+    # 5. Gap Final
     if current_time < end_window_utc:
         limit_end = end_window_utc
         
-        gap_start_ro = current_time.astimezone(tz_ro)
-        if ora_inchidere != 24:
-            ora_inchidere_azi = gap_start_ro.replace(hour=ora_inchidere, minute=0, second=0).astimezone(timezone.utc)
-            if limit_end > ora_inchidere_azi:
-                limit_end = ora_inchidere_azi
+        # Tăiere finală la închidere
+        gap_start_ro = current_time.astimezone(RO_OFFSET)
+        if current_closing_hour != 24:
+            h_close = int(current_closing_hour)
+            m_close = int((current_closing_hour - h_close) * 60)
+            ora_inchidere_azi_ro = gap_start_ro.replace(hour=h_close, minute=m_close, second=0)
+            ora_inchidere_azi_utc = ora_inchidere_azi_ro.astimezone(timezone.utc)
+            
+            if limit_end > ora_inchidere_azi_utc:
+                limit_end = ora_inchidere_azi_utc
         
         if limit_end > current_time:
             gap_duration = (limit_end - current_time).total_seconds() / 60
@@ -218,7 +279,6 @@ def calculeaza_gaps(
                 })
             
     return gaps
-
 
 # ==========================================
 # 4. RUTE API (Endpoints)
