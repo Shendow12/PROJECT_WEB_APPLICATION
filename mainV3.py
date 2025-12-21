@@ -269,7 +269,14 @@ def get_spalatorii_apropiate_disponibile(
     lat: float, lon: float, raza_km: float = 5.0, durata_dorita_min: int = 30
 ):
     try:
-        locatii = supabase.rpc('get_spalatorii_apropiate', {'user_lat': lat, 'user_lon': lon, 'raza_km': raza_km}).execute()
+        locatii = supabase.rpc(
+            'get_spalatorii_apropiate', 
+            {
+                'lat_user': lat, 
+                'lon_user': lon, 
+                'raza_km': raza_km
+            }
+        ).execute()
         if not locatii.data: return []
 
         spalatorii_ids = [s['id'] for s in locatii.data]
