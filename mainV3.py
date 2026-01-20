@@ -264,12 +264,15 @@ def add_spalatorie(spalatorie: SpalatorieCreate = Body(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/spalatorii-apropiate/disponibilitate", response_model=List[SpalatorieDisponibilaResponse])
+@app.get("/spalatorii-apropiate/disponibilitate")
 def get_spalatorii_apropiate_disponibile(
-    lat: float, lon: float, raza_km: float = 5.0, durata_dorita_min: int = 30
+    lat: float, 
+    lon: float, 
+    raza_km: float = 10, 
+    durata_dorita_min: int = 30
 ):
     try:
-        # 1. Apelăm funcția RPC (aici ai corectat deja parametrii, e bine)
+        # 1. Obținem locatiile (aici ai corectat deja parametrii lat_user/lon_user, e super)
         locatii = supabase.rpc(
             'get_spalatorii_apropiate', 
             {
@@ -279,15 +282,17 @@ def get_spalatorii_apropiate_disponibile(
             }
         ).execute()
         
-        if not locatii.data: return []
+        if not locatii.data:
+            return []
 
-        # --- FIX AICI: Folosim 'spalatorie_id' în loc de 'id' ---
-        spalatorii_ids = [s['spalatorie_id'] for s in locatii.data] 
+        # --- FIX 1: Folosim 'spalatorie_id' (cum vine din DB), nu 'id' ---
+        spalatorii_ids = [s['spalatorie_id'] for s in locatii.data]
         
         now = datetime.now(timezone.utc)
         end_window = now + timedelta(hours=2)
 
-        # Interogăm boxele și rezervările folosind cheia Service Role (acum ai acces)
+        # 2. Luăm datele despre boxe și rezervări
+        # Nota: Asigură-te că ai pus cheia SERVICE_ROLE în .env pe Render, altfel aici poate da eroare de permisiuni
         boxe_all = supabase.table('boxe').select('*').in_('spalatorie_id', spalatorii_ids).eq('is_available', True).execute()
         rezervari_all = supabase.table('rezervari').select('*').in_('spalatorie_id', spalatorii_ids).eq('status', 'activa').gte('ora_sfarsit', now.isoformat()).lte('ora_start', end_window.isoformat()).execute()
 
@@ -295,7 +300,7 @@ def get_spalatorii_apropiate_disponibile(
         for loc in locatii.data:
             program = loc.get('program_functionare', "00:00 - 24:00") or "00:00 - 24:00"
             
-            # --- FIX AICI: Folosim 'spalatorie_id' ---
+            # --- FIX 2: Comparăm cu 'spalatorie_id' ---
             boxe_locatie = [b for b in boxe_all.data if b['spalatorie_id'] == loc['spalatorie_id']]
             
             boxe_cu_gaps = []
@@ -312,8 +317,8 @@ def get_spalatorii_apropiate_disponibile(
             
             if boxe_cu_gaps:
                 rezultat_final.append({
-                    # --- FIX AICI: Folosim 'spalatorie_id' ---
-                    "spalatorie_id": loc['spalatorie_id'], 
+                    # --- FIX 3: Folosim 'spalatorie_id' pentru frontend ---
+                    "spalatorie_id": loc['spalatorie_id'],
                     "nume": loc['nume'],
                     "program_functionare": program,
                     "latitudine": loc['latitudine'],
@@ -323,7 +328,10 @@ def get_spalatorii_apropiate_disponibile(
                 })
 
         return rezultat_final
+
     except Exception as e:
+        print(f"Eroare procesare: {e}")
+        # Returnăm eroarea ca să o vedem clar în loguri
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- B. BOXE (CRUD) ---
