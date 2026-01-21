@@ -272,7 +272,7 @@ def get_spalatorii_apropiate_disponibile(
     durata_dorita_min: int = 30
 ):
     try:
-        # 1. Obținem locatiile (aici ai corectat deja parametrii lat_user/lon_user, e super)
+        # 1. Cerem datele de la Supabase
         locatii = supabase.rpc(
             'get_spalatorii_apropiate', 
             {
@@ -285,14 +285,13 @@ def get_spalatorii_apropiate_disponibile(
         if not locatii.data:
             return []
 
-        # --- FIX 1: Folosim 'spalatorie_id' (cum vine din DB), nu 'id' ---
+        # --- REPARAȚIA 1: Folosim 'spalatorie_id' ---
         spalatorii_ids = [s['spalatorie_id'] for s in locatii.data]
         
         now = datetime.now(timezone.utc)
         end_window = now + timedelta(hours=2)
 
         # 2. Luăm datele despre boxe și rezervări
-        # Nota: Asigură-te că ai pus cheia SERVICE_ROLE în .env pe Render, altfel aici poate da eroare de permisiuni
         boxe_all = supabase.table('boxe').select('*').in_('spalatorie_id', spalatorii_ids).eq('is_available', True).execute()
         rezervari_all = supabase.table('rezervari').select('*').in_('spalatorie_id', spalatorii_ids).eq('status', 'activa').gte('ora_sfarsit', now.isoformat()).lte('ora_start', end_window.isoformat()).execute()
 
@@ -300,7 +299,7 @@ def get_spalatorii_apropiate_disponibile(
         for loc in locatii.data:
             program = loc.get('program_functionare', "00:00 - 24:00") or "00:00 - 24:00"
             
-            # --- FIX 2: Comparăm cu 'spalatorie_id' ---
+            # --- REPARAȚIA 2: Folosim 'spalatorie_id' ---
             boxe_locatie = [b for b in boxe_all.data if b['spalatorie_id'] == loc['spalatorie_id']]
             
             boxe_cu_gaps = []
@@ -317,7 +316,7 @@ def get_spalatorii_apropiate_disponibile(
             
             if boxe_cu_gaps:
                 rezultat_final.append({
-                    # --- FIX 3: Folosim 'spalatorie_id' pentru frontend ---
+                    # --- REPARAȚIA 3: Folosim 'spalatorie_id' ---
                     "spalatorie_id": loc['spalatorie_id'],
                     "nume": loc['nume'],
                     "program_functionare": program,
@@ -330,8 +329,7 @@ def get_spalatorii_apropiate_disponibile(
         return rezultat_final
 
     except Exception as e:
-        print(f"Eroare procesare: {e}")
-        # Returnăm eroarea ca să o vedem clar în loguri
+        print(f"Eroare CRITICA: {e}") # Asta ne va ajuta să vedem eroarea dacă mai apare
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- B. BOXE (CRUD) ---
