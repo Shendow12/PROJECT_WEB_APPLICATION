@@ -276,9 +276,9 @@ def get_spalatorii_apropiate_disponibile(
         locatii = supabase.rpc(
             'get_spalatorii_apropiate', 
             {
-                'lat_user': lat, 
-                'lon_user': lon, 
-                'raza_km': raza_km
+                'p_lat': lat,       # <-- Am schimbat 'lat_user' în 'p_lat'
+                'p_lon': lon,       # <-- Am schimbat 'lon_user' în 'p_lon'
+                'p_raza_km': raza_km # <-- Am schimbat 'raza_km' în 'p_raza_km'
             }
         ).execute()
         
