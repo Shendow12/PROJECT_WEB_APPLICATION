@@ -95,11 +95,12 @@ class BoxaResponse(BoxaBase):
     boxa_id: str
     spalatorie_id: str
 
-# --- Rezervări (Actualizat pentru Auth) ---
+# --- Rezervări (Actualizat pentru Ora Specifică) ---
 class RezervareCreate(BaseModel):
     boxa_id: str
-    durata_minute: int 
-    # client_ref a fost eliminat, ID-ul vine din Token
+    durata_minute: int
+    # Adăugăm acest câmp opțional. Dacă lipsește, înseamnă "ACUM".
+    ora_start: Optional[datetime] = None
 
 class RezervareResponse(BaseModel):
     rezervare_id: str
@@ -367,14 +368,19 @@ def creare_rezervare(
     user = Depends(get_current_user) # Necesită Login
 ):
     try:
-        # 1. Aflăm locația
+        # 1. Aflăm locația (spalatorie_id) pe baza boxei
         boxa_info = supabase.table('boxe').select('spalatorie_id').eq('boxa_id', rezervare.boxa_id).execute()
         if not boxa_info.data:
             raise HTTPException(status_code=404, detail="Boxa nu există.")
         real_spalatorie_id = boxa_info.data[0]['spalatorie_id']
 
-        # 2. Calculăm timpii
-        start = datetime.now(timezone.utc)
+        # 2. Calculăm timpii (LOGICA NOUĂ)
+        # Dacă frontend-ul a trimis o oră preferată, o folosim. Altfel, folosim "ACUM".
+        if rezervare.ora_start:
+            start = rezervare.ora_start
+        else:
+            start = datetime.now(timezone.utc)
+            
         sfarsit = start + timedelta(minutes=rezervare.durata_minute)
         
         # 3. Inserăm (folosind user.id din token)
@@ -383,7 +389,7 @@ def creare_rezervare(
             "spalatorie_id": real_spalatorie_id,
             "ora_start": start.isoformat(),
             "ora_sfarsit": sfarsit.isoformat(),
-            "user_id": user.id,      
+            "user_id": user.id,       
             "status": "activa"
         }
         
@@ -399,7 +405,7 @@ def creare_rezervare(
 
     except Exception as e:
         if "conflict" in str(e).lower() or "exclusion" in str(e).lower():
-            raise HTTPException(status_code=409, detail="Boxa este deja ocupată!")
+            raise HTTPException(status_code=409, detail="Intervalul este deja ocupat!")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.patch("/rezervari/{rezervare_id}/checkout")
