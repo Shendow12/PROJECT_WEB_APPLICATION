@@ -417,6 +417,38 @@ def early_checkout(rezervare_id: str):
         raise HTTPException(404, "Nu există")
     except Exception as e: raise HTTPException(500, str(e))
 
+@app.patch("/rezervari/{rezervare_id}/anulare")
+def anuleaza_rezervare(rezervare_id: str, user = Depends(get_current_user)):
+    try:
+        # 1. Verificăm dacă rezervarea există și aparține utilizatorului
+        rez_check = supabase.table('rezervari').select('*').eq('rezervare_id', rezervare_id).eq('user_id', user.id).execute()
+        
+        if not rez_check.data:
+            raise HTTPException(status_code=404, detail="Rezervarea nu a fost găsită sau nu îți aparține.")
+            
+        rezervare_db = rez_check.data[0]
+        
+        # 2. Verificăm dacă e deja anulată sau finalizată
+        if rezervare_db['status'] != 'activa':
+            raise HTTPException(status_code=400, detail="Doar rezervările active pot fi anulate.")
+            
+        # (Aici în viitor poți adăuga logica de < 60 min pentru penalizare financiară)
+        
+        # 3. Actualizăm statusul în baza de date
+        response = supabase.table('rezervari').update({"status": "anulata"}).eq('rezervare_id', rezervare_id).execute()
+        
+        if response.data:
+            rezultat = response.data[0]
+            rezultat['client_ref'] = user.email
+            return rezultat
+            
+        raise HTTPException(status_code=500, detail="Eroare la anularea rezervării.")
+        
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # --- D. ISTORIC (SECURIZE CU AUTH) ---
 
 @app.get("/rezervari", response_model=List[RezervareResponse], summary="Istoricul Meu")
