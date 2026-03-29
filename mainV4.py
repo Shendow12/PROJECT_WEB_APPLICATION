@@ -516,32 +516,82 @@ def cauta_spalatorii_libere(lat: float, lon: float, raza_km: float = 5.0, durata
     for sp in rezultate:
         raspuns += f"- {sp['nume']} la {sp['distanta_km']:.1f} km. Are {len(sp['boxe_libere'])} boxe libere.\n"
     return raspuns
-    
+
+# --- E. CHAT CU AI (GEMINI) ---
 class ChatRequest(BaseModel):
     mesaj: str
     lat: float
     lon: float
 
 @app.post("/api/chat")
-def chat_cu_ai(request: ChatRequest):
+def chat_cu_ai(request: ChatRequest, user = Depends(get_current_user)):
+    # 1. Definim uneltele INCLUSE în rută, ca să aibă acces la obiectul `user`
+    
+    def cauta_spalatorii(raza_km: float = 5.0, durata_min: int = 30) -> str:
+        """Caută spălătorii și returnează ID-urile boxelor libere. Apelează asta prima dată când userul vrea să rezerve."""
+        rezultate = get_spalatorii_apropiate_disponibile(request.lat, request.lon, raza_km, durata_min)
+        if not rezultate: return "Nu am găsit nicio spălătorie liberă."
+        
+        raspuns = "Spălătorii găsite:\n"
+        for sp in rezultate:
+            raspuns += f"- {sp['nume']}\n"
+            for b in sp['boxe_libere']:
+                raspuns += f"  * Boxa: {b['nume_boxa']} (ID Boxa: {b['boxa_id']}) - Preț: {b['pret_rezervare_lei']} RON\n"
+        return raspuns
+
+    def rezerva_boxa(boxa_id: str, durata_minute: int) -> str:
+        """Rezervă o boxă pentru utilizator. Necesită boxa_id (obținut din căutare) și durata în minute."""
+        try:
+            # Aflăm spălătoria de care aparține boxa
+            boxa_info = supabase.table('boxe').select('spalatorie_id').eq('boxa_id', boxa_id).execute()
+            if not boxa_info.data: return "Eroare: Boxa nu există."
+            
+            real_spalatorie_id = boxa_info.data[0]['spalatorie_id']
+            start = datetime.now(timezone.utc)
+            sfarsit = start + timedelta(minutes=durata_minute)
+            
+            data_insert = {
+                "boxa_id": boxa_id,
+                "spalatorie_id": real_spalatorie_id,
+                "ora_start": start.isoformat(),
+                "ora_sfarsit": sfarsit.isoformat(),
+                "user_id": user.id, # <-- Aici e magia! Folosim ID-ul userului logat
+                "status": "activa"
+            }
+            res = supabase.table('rezervari').insert(data_insert).execute()
+            if res.data:
+                return f"Rezervare creată cu succes! ID-ul rezervării este: {res.data[0]['rezervare_id']}"
+            return "Eroare la crearea rezervării în baza de date."
+        except Exception as e:
+            return f"Eroare: {str(e)}"
+
+    def anuleaza_rezervare_chat(rezervare_id: str) -> str:
+        """Anulează o rezervare activă a utilizatorului. Cere-i utilizatorului ID-ul rezervării dacă nu îl știi."""
+        try:
+            # Securitate: Verificăm dacă rezervarea chiar îi aparține acestui user
+            rez_check = supabase.table('rezervari').select('*').eq('rezervare_id', rezervare_id).eq('user_id', user.id).execute()
+            if not rez_check.data: return "Eroare: Rezervarea nu a fost găsită sau nu îți aparține."
+            if rez_check.data[0]['status'] != 'activa': return "Eroare: Rezervarea nu mai este activă."
+            
+            res = supabase.table('rezervari').update({"status": "anulata"}).eq('rezervare_id', rezervare_id).execute()
+            if res.data: return "Rezervarea a fost anulată cu succes."
+            return "Eroare la anulare."
+        except Exception as e:
+            return f"Eroare: {str(e)}"
+
+    # 2. Configurăm Gemini cu aceste 3 unelte super-puternice
     try:
-        # 1. Inițializăm modelul Gemini și îi spunem ce "unelte" are la dispoziție
         model = genai.GenerativeModel(
-            model_name='gemini-2.5-pro', # Folosim 1.5 Flash pentru viteză
-            tools=[cauta_spalatorii_libere], # Aici îi dăm funcția noastră!
-            system_instruction="Ești asistentul virtual QuickWash. Ajută utilizatorii să găsească și să rezerve spălătorii auto. Fii scurt, prietenos și folosește uneltele disponibile pentru a verifica datele reale."
+            model_name='gemini-2.5-pro',
+            tools=[cauta_spalatorii, rezerva_boxa, anuleaza_rezervare_chat],
+            system_instruction="Ești asistentul virtual QuickWash. Ajută utilizatorul să găsească spălătorii, să rezerve boxe și să anuleze rezervări. Dacă utilizatorul vrea să rezerve, folosește întâi `cauta_spalatorii` ca să afli `boxa_id`, apoi întreabă-l cât timp dorește, și la final apelează `rezerva_boxa`. Fii scurt, politicos și direct."
         )
 
-        # 2. Începem o sesiune de chat
         chat = model.start_chat(enable_automatic_function_calling=True)
-
-        # 3. Adăugăm contextul locației în secret, pentru ca modelul să știe unde e userul
-        context_mesaj = f"(Locația mea curentă este lat: {request.lat}, lon: {request.lon}). {request.mesaj}"
-
-        # 4. Trimitem mesajul către LLM
+        context_mesaj = f"(User ID: {user.id}, Locație curentă lat: {request.lat}, lon: {request.lon}). Mesaj user: {request.mesaj}"
+        
         response = chat.send_message(context_mesaj)
 
-        # 5. Returnăm răspunsul inteligent către Frontend
         return {"raspuns_ai": response.text}
 
     except Exception as e:
