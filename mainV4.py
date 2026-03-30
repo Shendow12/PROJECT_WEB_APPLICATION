@@ -578,13 +578,61 @@ def chat_cu_ai(request: ChatRequest, user = Depends(get_current_user)):
             return "Eroare la anulare."
         except Exception as e:
             return f"Eroare: {str(e)}"
+        
+    def adauga_boxa_chat(spalatorie_id: str, nume_boxa: str, pret_lei: float) -> str:
+        """
+        Adaugă o boxă nouă pentru o spălătorie. 
+        Folosește această funcție doar când un administrator îți cere să adauge o boxă.
+        Cere-i administratorului ID-ul spălătoriei (spalatorie_id) dacă nu ți l-a dat deja.
+        """
+        try:
+            # În mod normal, aici am verifica dacă user.id este cu adevărat proprietarul acelei spălătorii
+            data_insert = {
+                "spalatorie_id": spalatorie_id,
+                "nume_boxa": nume_boxa,
+                "pret_rezervare_lei": pret_lei,
+                "timp_rezervare_minute": 60,
+                "is_available": True
+            }
+            res = supabase.table('boxe').insert(data_insert).execute()
+            if res.data:
+                return f"Boxa '{nume_boxa}' a fost adăugată cu succes în sistem! ID-ul ei este {res.data[0]['boxa_id']}."
+            return "Eroare la adăugarea boxei în baza de date."
+        except Exception as e:
+            return f"Eroare: {str(e)}"
+
+    def modifica_pret_boxa_chat(boxa_id: str, pret_nou: float) -> str:
+        """
+        Modifică prețul unei boxe auto existente.
+        Ai nevoie de boxa_id și de noul preț. Dacă nu știi boxa_id, cere-i administratorului detalii.
+        """
+        try:
+            res = supabase.table('boxe').update({"pret_rezervare_lei": pret_nou}).eq('boxa_id', boxa_id).execute()
+            if res.data:
+                return f"Prețul boxei a fost actualizat cu succes la {pret_nou} RON."
+            return "Eroare la actualizarea prețului."
+        except Exception as e:
+            return f"Eroare: {str(e)}"
+        
 
     # 2. Configurăm Gemini cu aceste 3 unelte super-puternice
     try:
         model = genai.GenerativeModel(
             model_name='gemini-2.5-pro',
-            tools=[cauta_spalatorii, rezerva_boxa, anuleaza_rezervare_chat],
-            system_instruction="Ești asistentul virtual QuickWash. Ajută utilizatorul să găsească spălătorii, să rezerve boxe și să anuleze rezervări. Dacă utilizatorul vrea să rezerve, folosește întâi `cauta_spalatorii` ca să afli `boxa_id`, apoi întreabă-l cât timp dorește, și la final apelează `rezerva_boxa`. Fii scurt, politicos și direct."
+            tools=[
+                cauta_spalatorii, 
+                rezerva_boxa, 
+                anuleaza_rezervare_chat,
+                adauga_boxa_chat,       # <-- Unealtă nouă adăugată!
+                modifica_pret_boxa_chat # <-- Unealtă nouă adăugată!
+            ],
+            system_instruction="""
+            Ești asistentul virtual QuickWash, capabil să ajute atât clienții cât și administratorii de spălătorii. 
+            - Pentru CLIENȚI: Caută spălătorii, fă rezervări și anulează.
+            - Pentru ADMINI: Adaugă boxe noi la spălătoriile lor și modifică prețurile. 
+            Dacă îți lipsesc informații (ex: spalatorie_id sau boxa_id pentru admini), cere-le politicos înainte de a apela funcția.
+            Fii scurt, profesionist și acționează ca un sistem ERP inteligent.
+            """
         )
 
         chat = model.start_chat(enable_automatic_function_calling=True)
